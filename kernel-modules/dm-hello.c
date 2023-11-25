@@ -129,6 +129,6 @@ static void __exit dm_hello_exit(void)
 module_init(dm_hello_init);
 module_exit(dm_hello_exit);
 
-MODULE_DESCRIPTION(DM_NAME "hello target");
-MODULE_AUTHOR("Joe Thornber <dm-devel@redhat.com>");
+MODULE_DESCRIPTION(DM_NAME "hello dm target");
+MODULE_AUTHOR("Satoru Takeuchi <satoru.takeuchi@gmail.com>");
 MODULE_LICENSE("GPL");
