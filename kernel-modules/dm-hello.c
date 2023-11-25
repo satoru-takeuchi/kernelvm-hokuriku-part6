@@ -67,19 +67,11 @@ static void hello_dtr(struct dm_target *ti)
 	kfree(hc);
 }
 
-static void hello_map_bio(struct dm_target *ti, struct bio *bio)
-{
-	struct hello_c *hc = ti->private;
-
-	bio_set_dev(bio, hc->dev->bdev);
-	if (bio_sectors(bio))
-		bio->bi_iter.bi_sector = dm_target_offset(ti, bio->bi_iter.bi_sector);
-}
-
 static char hello[] = "Hello!\n";
 
 static int hello_map(struct dm_target *ti, struct bio *bio)
 {
+	struct hello_c *hc = ti->private;
 	struct bvec_iter iter;
 	struct bio_vec bvec;
 
@@ -96,20 +88,9 @@ static int hello_map(struct dm_target *ti, struct bio *bio)
 		kunmap_local(segment);
 		break;
 	}
-	hello_map_bio(ti, bio);
+	bio_set_dev(bio, hc->dev->bdev);
 
 	return DM_MAPIO_REMAPPED;
-}
-
-static int hello_prepare_ioctl(struct dm_target *ti, struct block_device **bdev)
-{
-	struct hello_c *hc = ti->private;
-
-	*bdev = hc->dev->bdev;
-
-	if (ti->len != i_size_read((*bdev)->bd_inode) >> SECTOR_SHIFT)
-		return 1;
-	return 0;
 }
 
 static int hello_iterate_devices(struct dm_target *ti, iterate_devices_callout_fn fn, void *data)
@@ -127,7 +108,6 @@ static struct target_type hello_target = {
 	.ctr    = hello_ctr,
 	.dtr    = hello_dtr,
 	.map    = hello_map,
-	.prepare_ioctl = hello_prepare_ioctl,
 	.iterate_devices = hello_iterate_devices,
 };
 

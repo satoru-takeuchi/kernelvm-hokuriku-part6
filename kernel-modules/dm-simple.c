@@ -33,7 +33,7 @@ static int simple_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	sc = kmalloc(sizeof(*sc), GFP_KERNEL);
 	if (sc == NULL) {
-		ti->error = "Cannot allocate simple context";
+		ti->error = "Cannot allocate context";
 		return -ENOMEM;
 	}
 
@@ -66,22 +66,8 @@ static int simple_map(struct dm_target *ti, struct bio *bio)
 	struct simple_c *sc = ti->private;
 
 	bio_set_dev(bio, sc->dev->bdev);
-	if (bio_sectors(bio))
-		bio->bi_iter.bi_sector = dm_target_offset(ti, bio->bi_iter.bi_sector);
 
 	return DM_MAPIO_REMAPPED;
-}
-
-static int simple_prepare_ioctl(struct dm_target *ti, struct block_device **bdev)
-{
-	struct simple_c *sc = (struct simple_c *) ti->private;
-	struct dm_dev *dev = sc->dev;
-
-	*bdev = dev->bdev;
-
-	if (ti->len != i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT)
-		return 1;
-	return 0;
 }
 
 static int simple_iterate_devices(struct dm_target *ti,
@@ -100,7 +86,6 @@ static struct target_type simple_target = {
 	.ctr    = simple_ctr,
 	.dtr    = simple_dtr,
 	.map    = simple_map,
-	.prepare_ioctl = simple_prepare_ioctl,
 	.iterate_devices = simple_iterate_devices,
 };
 
