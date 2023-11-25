@@ -20,6 +20,7 @@ $ sudo losetup /dev/loop0 test.img # /dev/loop0が既に使われていた場合
 
 ```console
 $ make -C kernel-modules
-$ sudo insmod kernel-modules/dm-simple.ko
 $ sudo insmod kernel-modules/dm-dust.ko
+$ sudo insmod kernel-modules/dm-simple.ko
+$ sudo insmod kernel-modules/dm-hello.ko
 ```

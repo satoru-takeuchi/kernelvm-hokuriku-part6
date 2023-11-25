@@ -1,5 +1,5 @@
 ifneq ($(KERNELRELEASE),)
-obj-m  := dm-simple.o dm-dust.o
+obj-m  := dm-simple.o dm-dust.o dm-hello.o
 
 else
 KDIR ?= /usr/src/linux-headers-$(shell uname -r)

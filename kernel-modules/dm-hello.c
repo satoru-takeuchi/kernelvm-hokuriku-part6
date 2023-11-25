@@ -4,7 +4,7 @@
  *
  * This file is released under the GPL.
  *
- * This module modifies drivers/md/dm-linear.c in linux kernel.
+ * This module modifies drivers/md/dm-{linear,flakey}.c in linux kernel.
  */
 
 #include "dm.h"
@@ -151,8 +151,34 @@ static int linear_iterate_devices(struct dm_target *ti,
         return fn(ti, lc->dev, lc->start, ti->len, data);
 }
 
-static struct target_type simple_target = {
-	.name   = "simple",
+struct per_bio_data {
+	bool bio_submitted;
+};
+
+static char hello[] = "hello!";
+
+static int hello_end_io(struct dm_target *ti, struct bio *bio,
+			 blk_status_t *error)
+{
+	struct per_bio_data *pb = dm_per_bio_data(bio, sizeof(struct per_bio_data));
+
+	if (!*error && pb->bio_submitted && (bio_data_dir(bio) == READ)) {
+		struct bvec_iter iter;
+		struct bio_vec bvec;
+
+		bio_for_each_segment(bvec, bio, iter) {
+			unsigned char *segment = bvec_kmap_local(&bvec);
+			memcpy(segment, hello, sizeof(hello));
+			kunmap_local(segment);
+			break;
+		}
+	}
+
+	return DM_ENDIO_DONE;
+}
+
+static struct target_type hello_target = {
+	.name   = "hello",
 	.version = {0, 0, 1},
 	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_NOWAIT |
 		    DM_TARGET_PASSES_CRYPTO,
@@ -161,13 +187,14 @@ static struct target_type simple_target = {
 	.dtr    = linear_dtr,
 	.map    = linear_map,
 	.status = linear_status,
+	.end_io = hello_end_io,
 	.prepare_ioctl = linear_prepare_ioctl,
 	.iterate_devices = linear_iterate_devices,
 };
 
-int __init dm_simple_init(void)
+int __init dm_hello_init(void)
 {
-	int r = dm_register_target(&simple_target);
+	int r = dm_register_target(&hello_target);
 
 	if (r < 0)
 		DMERR("register failed %d", r);
@@ -175,14 +202,14 @@ int __init dm_simple_init(void)
 	return r;
 }
 
-void dm_simple_exit(void)
+void dm_hello_exit(void)
 {
-	dm_unregister_target(&simple_target);
+	dm_unregister_target(&hello_target);
 }
 
-module_init(dm_simple_init);
-module_exit(dm_simple_exit);
+module_init(dm_hello_init);
+module_exit(dm_hello_exit);
 
-MODULE_DESCRIPTION(DM_NAME "simple dm target");
+MODULE_DESCRIPTION(DM_NAME "dm target to say hello on read");
 MODULE_AUTHOR("Satoru Takeuchi <satoru.takeuchi@gmail.com>");
 MODULE_LICENSE("GPL");
