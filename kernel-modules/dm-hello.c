@@ -1,198 +1,147 @@
 /*
- * Copyright (C) 2023 Satoru Takeuchi <satoru.takeuchi@gmail.com>
- * Copyright (C) 2001-2003 Sistina Software (UK) Limited.
+ * Copyright (C) 2003 Sistina Software (UK) Limited.
+ * Copyright (C) 2004, 2010-2011 Red Hat, Inc. All rights reserved.
  *
  * This file is released under the GPL.
- *
- * This module modifies drivers/md/dm-{linear,flakey}.c in linux kernel.
  */
 
-#include "dm.h"
+#include <linux/device-mapper.h>
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/bio.h>
 #include <linux/slab.h>
-#include <linux/device-mapper.h>
 
-#define DM_MSG_PREFIX "simple"
+#define DM_MSG_PREFIX "hello"
 
-/*
- * Linear: maps a linear range of a device.
- */
-struct linear_c {
+struct hello_c {
 	struct dm_dev *dev;
 	sector_t start;
 };
 
-/*
- * Construct a linear mapping: <dev_path> <offset>
- */
-static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
+static int hello_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
-	struct linear_c *lc;
+	int r;
+	struct hello_c *hc;
+	struct dm_arg_set as;
+	const char *devname;
 	unsigned long long tmp;
-	char dummy;
-	int ret;
+	char _dontuse;
+
+	as.argc = argc;
+	as.argv = argv;
 
 	if (argc != 2) {
 		ti->error = "Invalid argument count";
 		return -EINVAL;
 	}
 
-	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
-	if (lc == NULL) {
-		ti->error = "Cannot allocate linear context";
+	hc = kzalloc(sizeof(*hc), GFP_KERNEL);
+	if (!hc) {
+		ti->error = "Cannot allocate context";
 		return -ENOMEM;
 	}
 
-	ret = -EINVAL;
-	if (sscanf(argv[1], "%llu%c", &tmp, &dummy) != 1 || tmp != (sector_t)tmp) {
-		ti->error = "Invalid device sector";
-		goto bad;
-	}
-	lc->start = tmp;
+	devname = dm_shift_arg(&as);
 
-	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &lc->dev);
-	if (ret) {
+	r = -EINVAL;
+	if (sscanf(dm_shift_arg(&as), "%llu%c", &tmp, &_dontuse) != 1 || tmp != (sector_t)tmp) {
+		ti->error = "Invalid device sector";
+		goto err;
+	}
+	hc->start = tmp;
+
+	r = dm_get_device(ti, devname, dm_table_get_mode(ti->table), &hc->dev);
+	if (r) {
 		ti->error = "Device lookup failed";
-		goto bad;
+		goto err;
 	}
 
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
-	ti->num_secure_erase_bios = 1;
-	ti->num_write_same_bios = 1;
-	ti->num_write_zeroes_bios = 1;
-	ti->private = lc;
+	ti->private = hc;
+	
 	return 0;
 
-      bad:
-	kfree(lc);
-	return ret;
+err:
+	kfree(hc);
+	return r;
 }
 
-static void linear_dtr(struct dm_target *ti)
+static void hello_dtr(struct dm_target *ti)
 {
-	struct linear_c *lc = (struct linear_c *) ti->private;
+	struct hello_c *hc = ti->private;
 
-	dm_put_device(ti, lc->dev);
-	kfree(lc);
+	dm_put_device(ti, hc->dev);
+	kfree(hc);
 }
 
-static sector_t linear_map_sector(struct dm_target *ti, sector_t bi_sector)
+static void hello_map_bio(struct dm_target *ti, struct bio *bio)
 {
-	struct linear_c *lc = ti->private;
+	struct hello_c *hc = ti->private;
 
-	return lc->start + dm_target_offset(ti, bi_sector);
-}
-
-static void linear_map_bio(struct dm_target *ti, struct bio *bio)
-{
-	struct linear_c *lc = ti->private;
-
-	bio_set_dev(bio, lc->dev->bdev);
+	bio_set_dev(bio, hc->dev->bdev);
 	if (bio_sectors(bio))
-		bio->bi_iter.bi_sector =
-			linear_map_sector(ti, bio->bi_iter.bi_sector);
+		bio->bi_iter.bi_sector = hc->start + dm_target_offset(ti, bio->bi_iter.bi_sector);
 }
 
-static int linear_map(struct dm_target *ti, struct bio *bio)
+static char hello[] = "Hello!\n";
+
+static int hello_map(struct dm_target *ti, struct bio *bio)
 {
-	linear_map_bio(ti, bio);
+	struct bvec_iter iter;
+	struct bio_vec bvec;
+
+	if (!bio_has_data(bio))
+		return DM_MAPIO_REMAPPED;
+
+	bio_for_each_segment(bvec, bio, iter) {
+		char *segment;
+		struct page *page = bio_iter_page(bio, iter);
+		if (unlikely(page == ZERO_PAGE(0)))
+			break;
+		segment = bvec_kmap_local(&bvec);
+		memcpy(segment, hello, sizeof(hello));
+		kunmap_local(segment);
+		break;
+	}
+	hello_map_bio(ti, bio);
 
 	return DM_MAPIO_REMAPPED;
 }
 
-static void linear_status(struct dm_target *ti, status_type_t type,
-			  unsigned status_flags, char *result, unsigned maxlen)
+static int hello_prepare_ioctl(struct dm_target *ti, struct block_device **bdev)
 {
-	struct linear_c *lc = (struct linear_c *) ti->private;
-	size_t sz = 0;
+	struct hello_c *hc = ti->private;
 
-	switch (type) {
-	case STATUSTYPE_INFO:
-		result[0] = '\0';
-		break;
+	*bdev = hc->dev->bdev;
 
-	case STATUSTYPE_TABLE:
-		DMEMIT("%s %llu", lc->dev->name, (unsigned long long)lc->start);
-		break;
-
-	case STATUSTYPE_IMA:
-		DMEMIT_TARGET_NAME_VERSION(ti->type);
-		DMEMIT(",device_name=%s,start=%llu;", lc->dev->name,
-		       (unsigned long long)lc->start);
-		break;
-	}
-}
-
-static int linear_prepare_ioctl(struct dm_target *ti, struct block_device **bdev)
-{
-	struct linear_c *lc = (struct linear_c *) ti->private;
-	struct dm_dev *dev = lc->dev;
-
-	*bdev = dev->bdev;
-
-	/*
-	 * Only pass ioctls through if the device sizes match exactly.
-	 */
-	if (lc->start ||
-	    ti->len != i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT)
+	if (hc->start || ti->len != i_size_read((*bdev)->bd_inode) >> SECTOR_SHIFT)
 		return 1;
 	return 0;
 }
 
-static int linear_iterate_devices(struct dm_target *ti,
-                                  iterate_devices_callout_fn fn, void *data)
+static int hello_iterate_devices(struct dm_target *ti, iterate_devices_callout_fn fn, void *data)
 {
-        struct linear_c *lc = ti->private;
+	struct hello_c *hc = ti->private;
 
-        return fn(ti, lc->dev, lc->start, ti->len, data);
-}
-
-struct per_bio_data {
-	bool bio_submitted;
-};
-
-static char hello[] = "hello!";
-
-static int hello_end_io(struct dm_target *ti, struct bio *bio,
-			 blk_status_t *error)
-{
-	struct per_bio_data *pb = dm_per_bio_data(bio, sizeof(struct per_bio_data));
-
-	if (!*error && pb->bio_submitted && (bio_data_dir(bio) == READ)) {
-		struct bvec_iter iter;
-		struct bio_vec bvec;
-
-		bio_for_each_segment(bvec, bio, iter) {
-			unsigned char *segment = bvec_kmap_local(&bvec);
-			memcpy(segment, hello, sizeof(hello));
-			kunmap_local(segment);
-			break;
-		}
-	}
-
-	return DM_ENDIO_DONE;
+	return fn(ti, hc->dev, hc->start, ti->len, data);
 }
 
 static struct target_type hello_target = {
 	.name   = "hello",
 	.version = {0, 0, 1},
-	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_NOWAIT |
-		    DM_TARGET_PASSES_CRYPTO,
+	.features = DM_TARGET_PASSES_CRYPTO,
 	.module = THIS_MODULE,
-	.ctr    = linear_ctr,
-	.dtr    = linear_dtr,
-	.map    = linear_map,
-	.status = linear_status,
-	.end_io = hello_end_io,
-	.prepare_ioctl = linear_prepare_ioctl,
-	.iterate_devices = linear_iterate_devices,
+	.ctr    = hello_ctr,
+	.dtr    = hello_dtr,
+	.map    = hello_map,
+	.prepare_ioctl = hello_prepare_ioctl,
+	.iterate_devices = hello_iterate_devices,
 };
 
-int __init dm_hello_init(void)
+static int __init dm_hello_init(void)
 {
 	int r = dm_register_target(&hello_target);
 
@@ -202,7 +151,7 @@ int __init dm_hello_init(void)
 	return r;
 }
 
-void dm_hello_exit(void)
+static void __exit dm_hello_exit(void)
 {
 	dm_unregister_target(&hello_target);
 }
@@ -210,6 +159,6 @@ void dm_hello_exit(void)
 module_init(dm_hello_init);
 module_exit(dm_hello_exit);
 
-MODULE_DESCRIPTION(DM_NAME "dm target to say hello on read");
-MODULE_AUTHOR("Satoru Takeuchi <satoru.takeuchi@gmail.com>");
+MODULE_DESCRIPTION(DM_NAME "hello target");
+MODULE_AUTHOR("Joe Thornber <dm-devel@redhat.com>");
 MODULE_LICENSE("GPL");
