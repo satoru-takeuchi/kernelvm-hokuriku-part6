@@ -17,7 +17,6 @@
 
 struct hello_c {
 	struct dm_dev *dev;
-	sector_t start;
 };
 
 static int hello_ctr(struct dm_target *ti, unsigned int argc, char **argv)
@@ -26,13 +25,11 @@ static int hello_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct hello_c *hc;
 	struct dm_arg_set as;
 	const char *devname;
-	unsigned long long tmp;
-	char _dontuse;
 
 	as.argc = argc;
 	as.argv = argv;
 
-	if (argc != 2) {
+	if (argc != 1) {
 		ti->error = "Invalid argument count";
 		return -EINVAL;
 	}
@@ -44,13 +41,6 @@ static int hello_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	devname = dm_shift_arg(&as);
-
-	r = -EINVAL;
-	if (sscanf(dm_shift_arg(&as), "%llu%c", &tmp, &_dontuse) != 1 || tmp != (sector_t)tmp) {
-		ti->error = "Invalid device sector";
-		goto err;
-	}
-	hc->start = tmp;
 
 	r = dm_get_device(ti, devname, dm_table_get_mode(ti->table), &hc->dev);
 	if (r) {
@@ -83,7 +73,7 @@ static void hello_map_bio(struct dm_target *ti, struct bio *bio)
 
 	bio_set_dev(bio, hc->dev->bdev);
 	if (bio_sectors(bio))
-		bio->bi_iter.bi_sector = hc->start + dm_target_offset(ti, bio->bi_iter.bi_sector);
+		bio->bi_iter.bi_sector = dm_target_offset(ti, bio->bi_iter.bi_sector);
 }
 
 static char hello[] = "Hello!\n";
@@ -117,7 +107,7 @@ static int hello_prepare_ioctl(struct dm_target *ti, struct block_device **bdev)
 
 	*bdev = hc->dev->bdev;
 
-	if (hc->start || ti->len != i_size_read((*bdev)->bd_inode) >> SECTOR_SHIFT)
+	if (ti->len != i_size_read((*bdev)->bd_inode) >> SECTOR_SHIFT)
 		return 1;
 	return 0;
 }
@@ -126,7 +116,7 @@ static int hello_iterate_devices(struct dm_target *ti, iterate_devices_callout_f
 {
 	struct hello_c *hc = ti->private;
 
-	return fn(ti, hc->dev, hc->start, ti->len, data);
+	return fn(ti, hc->dev, 0, ti->len, data);
 }
 
 static struct target_type hello_target = {

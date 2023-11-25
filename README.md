@@ -1,5 +1,5 @@
 # kernelvm-hokuriku-part6
-kernel/vm探検隊 北陸 part6で紹介した機能のソースコードです
+kernel/vm探検隊 北陸 part6で紹介したdevice mapperターゲットのソースコードと、ターゲットを作るためのテーブルです。
 
 # 環境
 
