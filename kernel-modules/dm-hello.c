@@ -75,6 +75,7 @@ static int hello_map(struct dm_target *ti, struct bio *bio)
 	struct bvec_iter iter;
 	struct bio_vec bvec;
 
+	DMERR("sat: %c, %u", bio_data_dir(bio) == READ ? 'r' : 'w', bio->bi_iter.bi_size);
 	if (!bio_has_data(bio))
 		return DM_MAPIO_REMAPPED;
 
