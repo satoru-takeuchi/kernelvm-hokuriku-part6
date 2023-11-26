@@ -75,8 +75,8 @@ static int hello_map(struct dm_target *ti, struct bio *bio)
 	struct bvec_iter iter;
 	struct bio_vec bvec;
 
-	if (!bio_has_data(bio))
-		return DM_MAPIO_REMAPPED;
+	if (bio_data_dir(bio) ==READ || !bio_has_data(bio))
+		goto map;
 
 	bio_for_each_segment(bvec, bio, iter) {
 		char *segment;
@@ -88,6 +88,7 @@ static int hello_map(struct dm_target *ti, struct bio *bio)
 		kunmap_local(segment);
 		break;
 	}
+map:
 	bio_set_dev(bio, hc->dev->bdev);
 
 	return DM_MAPIO_REMAPPED;
